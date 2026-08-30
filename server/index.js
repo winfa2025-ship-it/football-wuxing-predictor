@@ -11,6 +11,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 
 const config = require('../config');
 const apiRoutes = require('./routes/api');
@@ -27,7 +28,10 @@ app.use(express.json());
 
 // 靜態資源 (Web構建產物，如存在)
 const webDist = path.join(__dirname, '../dist');
-app.use(express.static(webDist));
+const hasWebBuild = fs.existsSync(path.join(webDist, 'index.html'));
+if (hasWebBuild) {
+  app.use(express.static(webDist));
+}
 
 // 認證路由 (公開)
 app.use('/api/auth', authRoutes);
@@ -46,16 +50,16 @@ app.get('/health', (req, res) => res.json({ status: 'ok', time: new Date().toISO
 // WebSocket 即時比分
 initWebsocket(io);
 
-// SPA fallback (服務Web構建)
-if (config.server.nodeEnv === 'production') {
+// SPA fallback (僅當存在 Web 構建產物時)
+if (hasWebBuild && config.server.nodeEnv === 'production') {
   app.get('*', (req, res) => {
     res.sendFile(path.join(webDist, 'index.html'));
   });
 }
 
 const PORT = config.server.port;
-server.listen(PORT, () => {
-  console.log(`🚀 足球五行數據預測app 伺服器已啟動: http://localhost:${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 足球五行數據預測app 伺服器已啟動: http://0.0.0.0:${PORT}`);
   console.log(`📡 即時比分 WebSocket 啟動中...`);
   console.log(`🔐 登入保護: ${config.auth.enabled ? '開啟 (邀請碼 ' + config.auth.inviteCode + ')' : '關閉'}`);
 
