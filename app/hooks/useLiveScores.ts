@@ -8,7 +8,7 @@ export function useLiveScores(): Fixture[] {
   const socketRef = useRef<Socket | null>(null);
 
   useEffect(() => {
-    const socket = io(BASE_URL, { transports: ['websocket'], reconnection: true });
+    const socket = io(BASE_URL || undefined, { transports: ['websocket'], reconnection: true });
     socketRef.current = socket;
 
     socket.on('connect', () => {

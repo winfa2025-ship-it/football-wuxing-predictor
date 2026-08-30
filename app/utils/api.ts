@@ -10,7 +10,7 @@ const getDefaultUrl = () => {
   return `http://${host}:3001`;
 };
 
-const BASE_URL = process.env.EXPO_PUBLIC_API_URL || getDefaultUrl();
+const BASE_URL = Platform.OS === 'web' ? '' : (process.env.EXPO_PUBLIC_API_URL || getDefaultUrl());
 
 async function request<T = any>(path: string, options: RequestInit = {}): Promise<T> {
   const token = await getToken();

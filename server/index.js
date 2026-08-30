@@ -26,7 +26,7 @@ app.use(cors());
 app.use(express.json());
 
 // 靜態資源 (Web構建產物，如存在)
-const webDist = path.join(__dirname, '../../dist');
+const webDist = path.join(__dirname, '../dist');
 app.use(express.static(webDist));
 
 // 認證路由 (公開)

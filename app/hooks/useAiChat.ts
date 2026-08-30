@@ -21,7 +21,7 @@ export function useAiChat() {
   msgRef.current = messages;
 
   useEffect(() => {
-    const socket = io(BASE_URL, { transports: ['websocket'], reconnection: true });
+    const socket = io(BASE_URL || undefined, { transports: ['websocket'], reconnection: true });
     socketRef.current = socket;
 
     socket.on('connect', () => setConnected(true));
