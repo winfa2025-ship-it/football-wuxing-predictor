@@ -1,0 +1,22 @@
+{
+  "name": "football-wuxing-predictor-server",
+  "version": "1.0.0",
+  "description": "足球五行數據預測app - AI + 風水命理足球預測後端服務",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.5",
+    "express": "^4.19.0",
+    "jsonwebtoken": "^9.0.3",
+    "mongodb": "^7.6.0",
+    "socket.io": "^4.7.0",
+    "socket.io-client": "^4.8.3"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}
