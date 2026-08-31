@@ -81,17 +81,20 @@ async function fetchOpenfootball(dateStr) {
 }
 
 // 合併: 以 openfootball 賽程為主體，用 SportScore 覆蓋即時比分/狀態
-function mergeFixtures(open, ss) {
+function mergeFixtures(open, ss, dateStr) {
   const ssByKey = new Map();
   for (const s of ss) {
     const k = `${(s.home || '').toLowerCase()}-${(s.away || '').toLowerCase()}`;
     ssByKey.set(k, s);
   }
+  const usedSsKeys = new Set();
   const result = open.map(m => {
     const homeKey = (m.home?.team?.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
     const awayKey = (m.away?.team?.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
     const sl = ssByKey.get(`${homeKey}-${awayKey}`) || ssByKey.get(`${awayKey}-${homeKey}`);
     if (sl) {
+      usedSsKeys.add(`${homeKey}-${awayKey}`);
+      usedSsKeys.add(`${awayKey}-${homeKey}`);
       let status = m.status;
       if (sl.status === 'live') status = 'live';
       else if (sl.status === 'finished' && m.status !== 'finished') status = 'finished';
@@ -105,7 +108,26 @@ function mergeFixtures(open, ss) {
     }
     return m;
   });
-  return result.map(f => ({ ...f, betting: generateBetting(f.id, f.home?.team?.name, f.away?.team?.name, 'openfootball') }));
+
+  // 加入 SportScore 當日但 openfootball 沒有的全球賽事
+  const openKeys = new Set(open.map(m => {
+    const hk = (m.home?.team?.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const ak = (m.away?.team?.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    return `${hk}-${ak}`;
+  }));
+  const extra = [];
+  ss.forEach((s, i) => {
+    const hk = (s.home || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const ak = (s.away || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const k = `${hk}-${ak}`;
+    const rk = `${ak}-${hk}`;
+    if (openKeys.has(k) || openKeys.has(rk) || usedSsKeys.has(k) || usedSsKeys.has(rk)) return;
+    if (dateStr && !(s.time || '').startsWith(dateStr)) return;
+    extra.push(ssToFixtures([s], '')[0]);
+  });
+
+  return result.map(f => ({ ...f, betting: generateBetting(f.id, f.home?.team?.name, f.away?.team?.name, 'openfootball') }))
+    .concat(extra);
 }
 
 function parseFixtures(data) {
@@ -140,19 +162,24 @@ async function getFixtures(date = new Date()) {
 
   try {
     const [open, ss] = await Promise.all([fetchOpenfootball(dateStr), fetchSportScore()]);
-    const merged = mergeFixtures(open, ss);
-    if (merged.length > 0) return merged;
-    return ssToFixtures(ss, dateStr);
+    // openfootball 主流聯賽 + SportScore 全球當日賽事
+    const merged = mergeFixtures(open, ss, dateStr);
+    return merged;
   } catch (err) {
     console.error('Fixtures fetch failed:', err.message);
-    return mockFixtures();
+    try {
+      const ss = await fetchSportScore();
+      return ssToFixtures(ss, dateStr);
+    } catch (e2) {
+      return mockFixtures();
+    }
   }
 }
 
 // 當 openfootball 沒有該日賽程時，直接用 SportScore 當日賽事
 function ssToFixtures(ss, dateStr) {
   return ss
-    .filter(s => (s.time || '').startsWith(dateStr))
+    .filter(s => !dateStr || (s.time || '').startsWith(dateStr))
     .map((s, i) => ({
       id: `ss:${i}:${s.home}-${s.away}`,
       date: s.time,
