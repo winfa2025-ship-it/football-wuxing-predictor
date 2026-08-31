@@ -33,13 +33,14 @@ if (hasWebBuild) {
   app.use(express.static(webDist));
 }
 
-// 認證路由 (公開)
+// 認證路由 (註冊/登入)
 app.use('/api/auth', authRoutes);
 
-// 其餘 API 需登入 (若啟用登入保護)
-if (config.auth.enabled) {
-  app.use('/api', authenticate);
-}
+// 所有資料 API 公開 (免登入即可查看賽事/預測)
+// 若需開啟登入保護，請在 .env 設定 AUTH_ENABLED=true 並啟用下方 middleware
+// if (config.auth.enabled) {
+//   app.use('/api', authenticate);
+// }
 
 // API 路由
 app.use('/api', apiRoutes);
