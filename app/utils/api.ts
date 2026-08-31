@@ -3,14 +3,16 @@ import { Platform } from 'react-native';
 import { Fixture, DailyPrediction, FengshuiAnalysis, Commentary, MatchHistory } from './types';
 import { getToken } from './token';
 
+const PROD_API_URL = 'https://football-wuxing-predictor-3.onrender.com';
+
 const getDefaultUrl = () => {
-  if (Platform.OS === 'web') return 'http://localhost:3001';
+  if (Platform.OS === 'web') return PROD_API_URL;
   const debuggerHost = Constants.expoConfig?.hostUri || Constants.expoGoConfig?.debuggerHost;
   const host = debuggerHost?.split(':')?.[0] || 'localhost';
   return `http://${host}:3001`;
 };
 
-const BASE_URL = Platform.OS === 'web' ? '' : (process.env.EXPO_PUBLIC_API_URL || getDefaultUrl());
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL || PROD_API_URL;
 
 async function request<T = any>(path: string, options: RequestInit = {}): Promise<T> {
   const token = await getToken();

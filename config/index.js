@@ -19,8 +19,8 @@ const config = {
     jwtExpires: process.env.JWT_EXPIRES || '30d',
     // 邀請碼 (首次註冊需驗證，自用設定)
     inviteCode: process.env.INVITE_CODE || 'VIP888',
-    // 是否啟用登入保護 (停用時可繞過，方便開發)
-    enabled: (process.env.AUTH_ENABLED || 'true') !== 'false',
+    // 是否啟用登入保護 (預設關閉，免登入即可看賽事；設 AUTH_ENABLED=true 可開啟)
+    enabled: (process.env.AUTH_ENABLED || 'false') === 'true',
   },
   api: {
     // 免費足球API提供商 (api-football via rapidapi)
