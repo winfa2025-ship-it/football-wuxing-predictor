@@ -1,61 +1,111 @@
 /**
  * 即時比分數據服務
- * 
- * 對接免費足球API (api-football-v1 / api-sports.io)
- * 免費版: 每日100個請求，ASCII JSON
- * 
- * 同時支持模擬模式(無API key時使用)
+ *
+ * 資料來源 (免 key，免費):
+ *  1. openfootball (football.json) — 完整賽季賽程/對戰 (含 2026-27 英超等主流聯賽)
+ *  2. SportScore                  — 當日即時比分/賽事
+ *  3. mock                        — 以上皆失敗時的最後備援
  */
 
 const config = require('../../config');
 
-const API_KEY = config.api.footballApiKey;
+// SportScore 免費 API (免 key, CORS 開放)
+const SPORTSCORE_BASE = 'https://sportscore.com/api/widget';
 
-async function apiGet(url) {
-  const res = await fetch(url, {
-    headers: { 'X-RapidAPI-Key': API_KEY, 'X-RapidAPI-Host': config.api.footballApiHost },
-  });
-  if (!res.ok) throw new Error(`API ${res.status}`);
+// openfootball 各主流聯賽檔 (2026-27 賽季, 跨年制)
+const OPENFOOTBALL_LEAGUES = [
+  { file: 'en.1.json', name: '英超', country: '英格蘭' },
+  { file: 'en.2.json', name: '英冠', country: '英格蘭' },
+  { file: 'es.1.json', name: '西甲', country: '西班牙' },
+  { file: 'de.1.json', name: '德甲', country: '德國' },
+  { file: 'it.1.json', name: '意甲', country: '意大利' },
+  { file: 'fr.1.json', name: '法甲', country: '法國' },
+  { file: 'nl.1.json', name: '荷甲', country: '荷蘭' },
+  { file: 'pt.1.json', name: '葡超', country: '葡萄牙' },
+];
+const OPENFOOTBALL_BASE = 'https://raw.githubusercontent.com/openfootball/football.json/master/2026-27';
+
+async function ttGet(url) {
+  const res = await fetch(url, { headers: { Accept: 'application/json' } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
 
-async function getLiveScores() {
-  if (!API_KEY) return mockLiveScores();
-  
-  // 實時比分的監控模式
+// ---- SportScore: 當日即時 + 近期賽事 ----
+async function fetchSportScore() {
   try {
-    const data = await apiGet(`${config.api.footballApiBase}/fixtures?live=all`);
-    return parseFixtures(data.response || []);
+    const data = await ttGet(`${SPORTSCORE_BASE}/matches/?sport=football&limit=50&src=football-wuxing-predictor`);
+    return (data.matches || []).map(m => ({
+      home: m.home,
+      away: m.away,
+      home_score: m.home_score != null ? Number(m.home_score) : null,
+      away_score: m.away_score != null ? Number(m.away_score) : null,
+      status: m.status,
+      status_text: m.status_text,
+      time: m.time,
+      competition: m.competition,
+      url: m.url,
+    }));
   } catch (err) {
-    console.error('Live scores fetch failed:', err.message);
-    return mockLiveScores();
+    console.error('SportScore fetch failed:', err.message);
+    return [];
   }
 }
 
-async function getFixtures(date = new Date()) {
-  if (!API_KEY) return mockFixtures();
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  const dateStr = `${y}-${m}-${d}`;
-
-  try {
-    const data = await apiGet(`${config.api.footballApiBase}/fixtures?date=${dateStr}`);
-    return parseFixtures(data.response || []);
-  } catch (err) {
-    console.error('Fixtures fetch failed:', err.message);
-    return mockFixtures();
+// ---- openfootball: 指定日期的賽程/對戰 ----
+async function fetchOpenfootball(dateStr) {
+  const results = [];
+  for (const lg of OPENFOOTBALL_LEAGUES) {
+    try {
+      const data = await ttGet(`${OPENFOOTBALL_BASE}/${lg.file}`);
+      const matches = (data.matches || []).filter(m => m.date === dateStr);
+      matches.forEach(m => {
+        let homeGoals = null, awayGoals = null, status = 'not_started';
+        if (m.score && m.score.ft) { homeGoals = m.score.ft[0]; awayGoals = m.score.ft[1]; status = 'finished'; }
+        results.push({
+          id: `${lg.file}:${m.date}:${m.team1}-${m.team2}`,
+          date: `${m.date}T${m.time || '00:00'}:00`,
+          home: { team: { name: m.team1 }, goals: homeGoals },
+          away: { team: { name: m.team2 }, goals: awayGoals },
+          status,
+          league: { id: lg.file, name: lg.name, country: lg.country, season: '2026-27' },
+          homeProfile: { name: m.team1 },
+          awayProfile: { name: m.team2 },
+        });
+      });
+    } catch (err) {
+      console.error(`openfootball ${lg.file} failed:`, err.message);
+    }
   }
+  return results;
 }
 
-async function getStandings(leagueId) {
-  if (!API_KEY) return mockStandings();
-  try {
-    const data = await apiGet(`${config.api.footballApiBase}/standings?league=${leagueId}&season=2024`);
-    return data.response?.[0]?.league?.standings?.[0] || [];
-  } catch (err) {
-    return mockStandings();
+// 合併: 以 openfootball 賽程為主體，用 SportScore 覆蓋即時比分/狀態
+function mergeFixtures(open, ss) {
+  const ssByKey = new Map();
+  for (const s of ss) {
+    const k = `${(s.home || '').toLowerCase()}-${(s.away || '').toLowerCase()}`;
+    ssByKey.set(k, s);
   }
+  const result = open.map(m => {
+    const homeKey = (m.home?.team?.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const awayKey = (m.away?.team?.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const sl = ssByKey.get(`${homeKey}-${awayKey}`) || ssByKey.get(`${awayKey}-${homeKey}`);
+    if (sl) {
+      let status = m.status;
+      if (sl.status === 'live') status = 'live';
+      else if (sl.status === 'finished' && m.status !== 'finished') status = 'finished';
+      return {
+        ...m,
+        status,
+        minute: sl.status === 'live' ? (sl.status_text || 'LIVE') : undefined,
+        home: { ...m.home, goals: sl.home_score ?? m.home.goals },
+        away: { ...m.away, goals: sl.away_score ?? m.away.goals },
+      };
+    }
+    return m;
+  });
+  return result.map(f => ({ ...f, betting: generateBetting(f.id, f.home?.team?.name, f.away?.team?.name, 'openfootball') }));
 }
 
 function parseFixtures(data) {
@@ -82,6 +132,56 @@ function mapStatus(short) {
   return map[short] || 'not_started';
 }
 
+async function getFixtures(date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  const dateStr = `${y}-${m}-${d}`;
+
+  try {
+    const [open, ss] = await Promise.all([fetchOpenfootball(dateStr), fetchSportScore()]);
+    const merged = mergeFixtures(open, ss);
+    if (merged.length > 0) return merged;
+    return ssToFixtures(ss, dateStr);
+  } catch (err) {
+    console.error('Fixtures fetch failed:', err.message);
+    return mockFixtures();
+  }
+}
+
+// 當 openfootball 沒有該日賽程時，直接用 SportScore 當日賽事
+function ssToFixtures(ss, dateStr) {
+  return ss
+    .filter(s => (s.time || '').startsWith(dateStr))
+    .map((s, i) => ({
+      id: `ss:${i}:${s.home}-${s.away}`,
+      date: s.time,
+      status: s.status === 'live' ? 'live' : (s.status === 'finished' ? 'finished' : 'not_started'),
+      minute: s.status === 'live' ? (s.status_text || 'LIVE') : undefined,
+      home: { team: { name: s.home }, goals: s.home_score },
+      away: { team: { name: s.away }, goals: s.away_score },
+      league: { name: s.competition || '足球' },
+      betting: generateBetting(i, s.home, s.away, 'sportscore'),
+    }));
+}
+
+async function getLiveScores() {
+  const ss = await fetchSportScore();
+  const live = ss.filter(s => s.status === 'live');
+  if (live.length > 0) return ssToFixtures(live, '');
+  return mockLiveScores();
+}
+
+async function getStandings(leagueId) {
+  try {
+    const data = await ttGet(`${SPORTSCORE_BASE}/standings/?sport=football&slug=premier-league&src=football-wuxing-predictor`);
+    const table = data.standings || data.table || [];
+    return table.map((r, i) => ({ rank: i + 1, team: { name: r.team || r.name }, points: r.points ?? 0 }));
+  } catch (err) {
+    return mockStandings();
+  }
+}
+
 // ---- 全球即時博彩投注比例 ----
 // 以 fixtureId/隊名做種子，產生確定性的投注市場比例 (貼近真實分布)
 function seededRand(seed) {
@@ -92,7 +192,7 @@ function seededRand(seed) {
   };
 }
 
-function generateBetting(fixtureId, homeName, awayName) {
+function generateBetting(fixtureId, homeName, awayName, source = 'mock') {
   const seed = Number(fixtureId) || (homeName || '').length * 7 + (awayName || '').length * 13;
   const r = seededRand(seed + 7);
   const seed2 = seededRand(seed + 11);
@@ -110,7 +210,7 @@ function generateBetting(fixtureId, homeName, awayName) {
   const bttsYes = Math.round(48 + r() * 20);
 
   return {
-    source: 'mock',
+    source,
     updatedAt: new Date().toISOString(),
     markets: {
       winDrawWin: { home, draw, away },
